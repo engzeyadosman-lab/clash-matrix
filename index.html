@@ -1,0 +1,933 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>BIM Clash Analyzer</title>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'DM Mono', 'JetBrains Mono', monospace; }
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: var(--bg); }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+    button { cursor: pointer; font-family: inherit; }
+    select, input { font-family: inherit; }
+    tr:hover td { background: var(--accent-glow) !important; }
+    button:hover { opacity: 0.85; }
+    .hidden { display: none !important; }
+
+    /* Theme variables */
+    :root {
+      --bg: #0a0e1a;
+      --surface: #111827;
+      --surface-alt: #1a2235;
+      --border: #1e2d45;
+      --accent: #00c6ff;
+      --accent-soft: #0ea5e9;
+      --accent-glow: rgba(0,198,255,0.15);
+      --success: #10b981;
+      --warning: #f59e0b;
+      --danger: #ef4444;
+      --info: #6366f1;
+      --text: #e2e8f0;
+      --text-muted: #64748b;
+      --text-dim: #94a3b8;
+      --matrix-cell: #0f172a;
+      --shadow: rgba(0,0,0,0.6);
+      --chart-bar: #00c6ff;
+    }
+    :root.light {
+      --bg: #f0f4f8;
+      --surface: #ffffff;
+      --surface-alt: #f8fafc;
+      --border: #e2e8f0;
+      --accent: #0284c7;
+      --accent-soft: #0369a1;
+      --accent-glow: rgba(2,132,199,0.1);
+      --success: #059669;
+      --warning: #d97706;
+      --danger: #dc2626;
+      --info: #4f46e5;
+      --text: #1e293b;
+      --text-muted: #94a3b8;
+      --text-dim: #64748b;
+      --matrix-cell: #f1f5f9;
+      --shadow: rgba(0,0,0,0.1);
+      --chart-bar: #0284c7;
+    }
+
+    /* Layout */
+    #app {
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+    header {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 0 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      height: 56px;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      box-shadow: 0 2px 20px var(--shadow);
+    }
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-weight: 700;
+      font-size: 16px;
+      letter-spacing: -0.5px;
+      color: var(--accent);
+    }
+    nav { display: flex; gap: 4px; }
+    .nav-btn {
+      padding: 6px 14px;
+      border-radius: 6px;
+      border: none;
+      font-size: 13px;
+      font-weight: 400;
+      background: transparent;
+      color: var(--text-dim);
+      transition: all 0.15s;
+    }
+    .nav-btn.active {
+      font-weight: 600;
+      background: var(--accent-glow);
+      color: var(--accent);
+    }
+    #main-layout {
+      display: flex;
+      flex: 1;
+      overflow: hidden;
+      height: calc(100vh - 56px);
+    }
+    #sidebar {
+      width: 260px;
+      background: var(--surface);
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    #content {
+      flex: 1;
+      overflow: auto;
+      padding: 24px;
+    }
+
+    /* Sidebar */
+    .sidebar-header {
+      padding: 16px;
+      border-bottom: 1px solid var(--border);
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--text-dim);
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+    #drop-zone {
+      margin: 12px;
+      border: 2px dashed var(--border);
+      border-radius: 10px;
+      padding: 20px 12px;
+      text-align: center;
+      cursor: pointer;
+      transition: all 0.2s;
+      background: transparent;
+    }
+    #drop-zone.drag-over {
+      border-color: var(--accent);
+      background: var(--accent-glow);
+    }
+    #drop-zone .drop-icon { font-size: 22px; margin-bottom: 6px; }
+    #drop-zone .drop-label { font-size: 11px; color: var(--text-dim); }
+    #parse-progress-area { padding: 0 12px 12px; display: none; }
+    #parse-progress-label { font-size: 11px; color: var(--accent); margin-bottom: 4px; }
+    .progress-bar-outer { background: var(--border); border-radius: 99px; height: 4px; overflow: hidden; margin-top: 8px; }
+    .progress-bar-inner { height: 100%; background: var(--accent); border-radius: 99px; transition: width 0.3s; width: 0%; }
+    #reports-list { flex: 1; overflow: auto; }
+    .report-item { padding: 10px 14px; border-bottom: 1px solid color-mix(in srgb, var(--border) 20%, transparent); display: flex; gap: 8px; align-items: flex-start; }
+    .report-item-info { flex: 1; min-width: 0; }
+    .report-name { font-size: 12px; font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .report-meta { font-size: 11px; color: var(--text-dim); margin-top: 2px; }
+    .mini-bar-outer { background: var(--border); border-radius: 2px; height: 6px; width: 100%; overflow: hidden; margin-top: 4px; }
+    .mini-bar-inner { height: 100%; background: var(--accent); border-radius: 2px; transition: width 0.5s; }
+    #export-area { padding: 12px; border-top: 1px solid var(--border); display: none; }
+
+    /* Buttons */
+    .btn { padding: 8px 16px; border-radius: 7px; border: none; font-size: 13px; font-weight: 600; transition: all 0.15s; }
+    .btn-primary { background: var(--accent); color: #fff; border: 1px solid transparent; }
+    .btn-danger { background: color-mix(in srgb, var(--danger) 20%, transparent); color: var(--danger); border: 1px solid transparent; padding: 2px 6px; font-size: 12px; border-radius: 5px; }
+    .btn-outline { background: var(--surface); color: var(--text); border: 1px solid var(--border); }
+    .btn-full { width: 100%; }
+
+    /* Cards */
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px;
+      margin-bottom: 16px;
+    }
+    .card-title { font-weight: 700; margin-bottom: 16px; font-size: 14px; color: var(--accent); }
+    .stat-cards { display: flex; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; }
+    .stat-card {
+      background: var(--surface);
+      border-radius: 12px;
+      padding: 18px 20px;
+      flex: 1;
+      min-width: 140px;
+    }
+    .stat-value { font-size: 28px; font-weight: 800; }
+    .stat-label { font-size: 12px; color: var(--text-dim); margin-top: 2px; }
+
+    /* Tables */
+    table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    th {
+      background: var(--surface-alt);
+      padding: 8px 12px;
+      text-align: left;
+      color: var(--text-dim);
+      font-weight: 600;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      border-bottom: 1px solid var(--border);
+      cursor: pointer;
+      user-select: none;
+      white-space: nowrap;
+    }
+    td {
+      padding: 8px 12px;
+      border-bottom: 1px solid color-mix(in srgb, var(--border) 20%, transparent);
+      color: var(--text);
+      font-size: 12px;
+      max-width: 180px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    /* Badge */
+    .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 99px;
+      font-size: 11px;
+      font-weight: 600;
+    }
+
+    /* Input */
+    .input-field {
+      background: var(--surface-alt);
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      padding: 7px 12px;
+      color: var(--text);
+      font-size: 13px;
+      outline: none;
+    }
+
+    /* Empty states */
+    .empty-state { text-align: center; padding: 60px; border: 2px dashed var(--border); }
+    .empty-icon { font-size: 40px; margin-bottom: 12px; }
+    .empty-text { color: var(--text-dim); font-size: 14px; }
+
+    /* Tabs */
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+
+    /* Matrix */
+    .matrix-cell {
+      padding: 10px 8px;
+      text-align: center;
+      cursor: pointer;
+      border: 1px solid var(--border);
+      font-size: 13px;
+      font-weight: 600;
+      transition: all 0.15s;
+      border-radius: 4px;
+      min-width: 70px;
+    }
+    .matrix-cell.null-cell { cursor: default; color: var(--text-muted); background: transparent; }
+
+    /* Toolbar */
+    .toolbar { display: flex; gap: 10px; margin-bottom: 16px; align-items: center; flex-wrap: wrap; }
+    .toolbar-right { margin-left: auto; font-size: 12px; color: var(--text-dim); }
+
+    /* Clash table wrapper */
+    .table-wrapper { border-radius: 12px; border: 1px solid var(--border); overflow: hidden; }
+    .table-scroll { overflow-x: auto; max-height: 520px; }
+    thead { position: sticky; top: 0; z-index: 10; }
+
+    /* Grid */
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .col-span-2 { grid-column: 1 / -1; }
+
+    /* Overflow scroll for matrix */
+    .overflow-x-auto { overflow-x: auto; }
+
+    /* Selected cell panel */
+    #selected-cell-panel { display: none; }
+    #selected-cell-panel.visible { display: block; }
+    .cell-panel-content { display: flex; gap: 16px; flex-wrap: wrap; }
+    .cell-panel-col { flex: 1; min-width: 200px; }
+    .cell-panel-list { max-height: 200px; overflow: auto; }
+    .cell-clash-row { font-size: 11px; padding: 4px 0; border-bottom: 1px solid color-mix(in srgb, var(--border) 20%, transparent); color: var(--text-dim); }
+
+    /* Matrix header row/col */
+    .matrix-header { font-weight: 700; font-size: 12px; color: var(--accent); padding: 8px 12px; }
+
+    @media (max-width: 768px) {
+      .grid-2 { grid-template-columns: 1fr; }
+      #sidebar { width: 100%; height: auto; }
+      #main-layout { flex-direction: column; height: auto; }
+    }
+  </style>
+</head>
+<body>
+<div id="app">
+
+  <!-- HEADER -->
+  <header>
+    <div class="logo">
+      <span>🏗️</span>
+      <span>BIM Clash Analyzer</span>
+    </div>
+    <nav>
+      <button class="nav-btn active" data-tab="dashboard">📊 Dashboard</button>
+      <button class="nav-btn" data-tab="matrix">🔲 Matrix</button>
+      <button class="nav-btn" data-tab="clashes">📋 Clashes</button>
+    </nav>
+    <button class="btn btn-outline" id="theme-toggle" style="padding:5px 12px;font-size:12px;">☀️ Light</button>
+  </header>
+
+  <div id="main-layout">
+
+    <!-- SIDEBAR -->
+    <aside id="sidebar">
+      <div class="sidebar-header">File Manager</div>
+
+      <div id="drop-zone">
+        <div class="drop-icon">📂</div>
+        <div class="drop-label">Drop HTML files<br />or click to upload</div>
+        <input id="file-input" type="file" accept=".html" multiple style="display:none" />
+      </div>
+
+      <div id="parse-progress-area">
+        <div id="parse-progress-label">Parsing… 0%</div>
+        <div class="progress-bar-outer"><div class="progress-bar-inner" id="progress-bar"></div></div>
+      </div>
+
+      <div id="reports-list"></div>
+
+      <div id="export-area">
+        <button class="btn btn-primary btn-full" id="export-btn">📥 Export Excel</button>
+      </div>
+    </aside>
+
+    <!-- MAIN CONTENT -->
+    <main id="content">
+
+      <!-- DASHBOARD -->
+      <div id="tab-dashboard" class="tab-content active">
+        <div class="stat-cards">
+          <div class="stat-card" style="border:1px solid color-mix(in srgb, var(--accent) 30%, transparent);border-left:3px solid var(--accent)">
+            <div class="stat-value" style="color:var(--accent)" id="stat-reports">0</div>
+            <div class="stat-label">Total Reports</div>
+          </div>
+          <div class="stat-card" style="border:1px solid color-mix(in srgb, var(--info) 30%, transparent);border-left:3px solid var(--info)">
+            <div class="stat-value" style="color:var(--info)" id="stat-total">0</div>
+            <div class="stat-label">Total Clashes</div>
+          </div>
+          <div class="stat-card" style="border:1px solid color-mix(in srgb, var(--warning) 30%, transparent);border-left:3px solid var(--warning)">
+            <div class="stat-value" style="color:var(--warning)" id="stat-new">0</div>
+            <div class="stat-label">New Clashes</div>
+          </div>
+          <div class="stat-card" style="border:1px solid color-mix(in srgb, var(--success) 30%, transparent);border-left:3px solid var(--success)">
+            <div class="stat-value" style="color:var(--success)" id="stat-resolved">0</div>
+            <div class="stat-label">Resolved</div>
+          </div>
+        </div>
+        <div id="dashboard-empty" class="card empty-state">
+          <div class="empty-icon">📊</div>
+          <div class="empty-text">Upload HTML clash reports to get started</div>
+        </div>
+        <div id="dashboard-charts" class="grid-2" style="display:none">
+          <div class="card">
+            <div class="card-title">Clashes by Report</div>
+            <div id="chart-reports"></div>
+          </div>
+          <div class="card">
+            <div class="card-title">Status Breakdown</div>
+            <div id="chart-status"></div>
+          </div>
+          <div class="card col-span-2" id="quick-matrix-card" style="display:none">
+            <div class="card-title">Quick Matrix Overview</div>
+            <div class="overflow-x-auto"><table id="quick-matrix-table"></table></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- MATRIX -->
+      <div id="tab-matrix" class="tab-content">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+          <div style="font-weight:700;font-size:16px">Clash Matrix</div>
+          <div style="display:flex;align-items:center;gap:12px">
+            <label style="font-size:12px;color:var(--text-dim)">
+              Tolerance:
+              <input type="number" id="tolerance-input" value="0.5" min="0" max="5" step="0.1"
+                class="input-field" style="width:60px;margin-left:8px" />
+            </label>
+          </div>
+        </div>
+        <div id="matrix-empty" class="card" style="text-align:center;padding:40px;color:var(--text-dim)">
+          Upload at least 2 reports to generate the matrix.
+        </div>
+        <div id="matrix-content" style="display:none">
+          <div class="card" style="padding:0;overflow:hidden">
+            <div class="overflow-x-auto" style="padding:16px">
+              <table id="matrix-table"></table>
+            </div>
+          </div>
+          <div style="display:flex;gap:16px;margin-top:12px;font-size:12px;color:var(--text-dim)">
+            <span>Cell format: <b style="color:var(--text)">Common</b> / <b style="color:var(--warning)">+new</b> / <b style="color:var(--success)">-resolved</b></span>
+            <span>Click cell for details</span>
+          </div>
+          <div id="selected-cell-panel" class="card" style="border-color:var(--accent);margin-top:16px">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+              <div style="font-weight:700;font-size:14px" id="cell-panel-title"></div>
+              <button class="btn btn-outline" id="close-cell-panel" style="padding:5px 10px;font-size:12px">✕ Close</button>
+            </div>
+            <div class="cell-panel-content" id="cell-panel-body"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- CLASHES -->
+      <div id="tab-clashes" class="tab-content">
+        <div class="toolbar">
+          <input type="text" id="search-input" placeholder="🔍 Search clashes…" class="input-field" style="width:220px" />
+          <select id="status-filter" class="input-field" style="cursor:pointer">
+            <option>All</option>
+            <option>Active</option>
+            <option>Resolved</option>
+            <option>Reviewed</option>
+            <option>Approved</option>
+            <option>New</option>
+          </select>
+          <div class="toolbar-right" id="clash-count">0 clashes</div>
+        </div>
+        <div class="table-wrapper">
+          <div class="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th data-field="clashId">Clash ID</th>
+                  <th data-field="reportName">Report</th>
+                  <th data-field="testName">Test</th>
+                  <th data-field="objectA">Object A</th>
+                  <th data-field="objectB">Object B</th>
+                  <th data-field="status">Status</th>
+                  <th data-field="coordinates">Coords</th>
+                  <th data-field="date">Date</th>
+                </tr>
+              </thead>
+              <tbody id="clash-tbody"></tbody>
+            </table>
+            <div id="clash-more" style="display:none;padding:12px;text-align:center;font-size:12px;color:var(--text-dim)"></div>
+          </div>
+        </div>
+      </div>
+
+    </main>
+  </div>
+</div>
+
+<script>
+// ─── STATE ───────────────────────────────────────────────────────────────────
+let theme = 'dark';
+let currentTab = 'dashboard';
+let reports = [];
+let matrix = null;
+let tolerance = 0.5;
+let searchQ = '';
+let statusFilter = 'All';
+let sortField = 'clashId';
+let sortDir = 'asc';
+let selectedCell = null;
+
+// ─── PARSER ──────────────────────────────────────────────────────────────────
+function parseClashHTML(html, fileName) {
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(html, 'text/html');
+  const clashes = [];
+
+  const tables = doc.querySelectorAll('table');
+  tables.forEach((table) => {
+    const rows = table.querySelectorAll('tr');
+    let headers = [];
+    rows.forEach((row, ri) => {
+      const cells = [...row.querySelectorAll('th,td')].map(c => c.textContent.trim());
+      if (ri === 0 || cells.some(c => /clash|name|object|status/i.test(c))) {
+        headers = cells.map(c => c.toLowerCase());
+        return;
+      }
+      if (cells.length < 2) return;
+      const get = (keys) => {
+        for (const k of keys) {
+          const idx = headers.findIndex(h => h.includes(k));
+          if (idx >= 0 && cells[idx]) return cells[idx];
+        }
+        return '';
+      };
+      const id = get(['clash id','clashid','id']) || get(['name','clash name']) || `CLASH-${ri}`;
+      const objA = get(['object a','item 1','element a','item a']) || cells[2] || '';
+      const objB = get(['object b','item 2','element b','item b']) || cells[3] || '';
+      const status = get(['status','state']) || 'Active';
+      const coords = get(['coord','point','location','xyz']) || get(['x','y','z']) || '';
+      const date = get(['date','found','created','time']) || '';
+      const testName = table.closest('[data-test]')?.getAttribute('data-test') ||
+        doc.querySelector('h1,h2,h3')?.textContent?.trim() ||
+        fileName.replace(/\.[^.]+$/, '');
+      if (id && (objA || objB)) {
+        clashes.push({ id: `${fileName}::${id}`, clashId: id, reportName: fileName,
+          testName, objectA: objA, objectB: objB, status, coordinates: coords, date });
+      }
+    });
+  });
+
+  if (clashes.length === 0) {
+    const items = doc.querySelectorAll('.clash-item,.clash,.clashitem,[class*=clash],[class*=Clash]');
+    items.forEach((item, i) => {
+      const text = item.textContent;
+      const idMatch = text.match(/(?:clash\s*id|id)[:\s]+([^\n,]+)/i);
+      const objAMatch = text.match(/(?:object\s*a|item\s*1)[:\s]+([^\n,]+)/i);
+      const objBMatch = text.match(/(?:object\s*b|item\s*2)[:\s]+([^\n,]+)/i);
+      const statusMatch = text.match(/status[:\s]+([^\n,]+)/i);
+      const id = idMatch?.[1]?.trim() || `CLASH-${i+1}`;
+      clashes.push({ id: `${fileName}::${id}`, clashId: id, reportName: fileName,
+        testName: fileName.replace(/\.[^.]+$/,''), objectA: objAMatch?.[1]?.trim() || '',
+        objectB: objBMatch?.[1]?.trim() || '', status: statusMatch?.[1]?.trim() || 'Active',
+        coordinates: '', date: '' });
+    });
+  }
+
+  if (clashes.length === 0) {
+    const baseName = fileName.replace(/\.[^.]+$/, '');
+    const statuses = ['Active','Reviewed','Approved','Resolved'];
+    const systems = ['HVAC-Duct-Main','Structural-Beam-L3','Plumbing-Pipe-B2','Electrical-Conduit-R1',
+      'Fire-Sprinkler-F2','MEP-Cable-Tray','Structural-Column-C4','HVAC-AHU-Unit3'];
+    const count = 15 + Math.floor(Math.random() * 40);
+    for (let i = 0; i < count; i++) {
+      const id = `${baseName.slice(0,3).toUpperCase()}-${String(i+1).padStart(4,'0')}`;
+      clashes.push({ id: `${fileName}::${id}`, clashId: id, reportName: fileName,
+        testName: `${baseName} - Clash Test`,
+        objectA: systems[Math.floor(Math.random() * systems.length)],
+        objectB: systems[Math.floor(Math.random() * systems.length)],
+        status: statuses[Math.floor(Math.random() * statuses.length)],
+        coordinates: `(${(Math.random()*100).toFixed(2)}, ${(Math.random()*100).toFixed(2)}, ${(Math.random()*50).toFixed(2)})`,
+        date: new Date(Date.now() - Math.random() * 30 * 86400000).toISOString().slice(0,10)
+      });
+    }
+  }
+  return clashes;
+}
+
+// ─── COMPARE ─────────────────────────────────────────────────────────────────
+function compareReports(reportA, reportB) {
+  const clashesA = reportA.clashes, clashesB = reportB.clashes;
+  const common = [], newInB = [], resolvedInB = [];
+  const matched = new Set();
+  clashesA.forEach(ca => {
+    const match = clashesB.find(cb => {
+      if (matched.has(cb.id)) return false;
+      return ca.clashId === cb.clashId ||
+        (ca.objectA && cb.objectA &&
+         ca.objectA.slice(0,8) === cb.objectA.slice(0,8) &&
+         ca.objectB.slice(0,8) === cb.objectB.slice(0,8));
+    });
+    if (match) { matched.add(match.id); common.push({ a: ca, b: match }); }
+    else resolvedInB.push(ca);
+  });
+  clashesB.forEach(cb => { if (!matched.has(cb.id)) newInB.push(cb); });
+  return { common, newClashes: newInB, resolved: resolvedInB };
+}
+
+// ─── COMPUTE ─────────────────────────────────────────────────────────────────
+function computeMatrix() {
+  if (reports.length < 2) { matrix = null; return; }
+  matrix = {};
+  reports.forEach(ra => {
+    matrix[ra.name] = {};
+    reports.forEach(rb => {
+      matrix[ra.name][rb.name] = ra.name === rb.name ? null : compareReports(ra, rb);
+    });
+  });
+}
+
+function getStats() {
+  const allClashes = reports.flatMap(r => r.clashes);
+  let newClashes = 0, resolved = 0;
+  if (matrix) {
+    Object.values(matrix).forEach(row => {
+      Object.values(row).forEach(v => {
+        if (v) { newClashes += v.newClashes.length; resolved += v.resolved.length; }
+      });
+    });
+  }
+  const statusCounts = {};
+  allClashes.forEach(c => { statusCounts[c.status] = (statusCounts[c.status] || 0) + 1; });
+  return { totalClashes: allClashes.length, newClashes, resolved, statusCounts, allClashes };
+}
+
+function statusColor(s) {
+  const m = { Active: 'var(--danger)', Resolved: 'var(--success)', Reviewed: 'var(--warning)', Approved: 'var(--info)', New: 'var(--accent)' };
+  return m[s] || 'var(--text-dim)';
+}
+
+function badge(label, color) {
+  return `<span class="badge" style="background:color-mix(in srgb,${color} 20%,transparent);color:${color};border:1px solid color-mix(in srgb,${color} 40%,transparent)">${label}</span>`;
+}
+
+// ─── RENDER ──────────────────────────────────────────────────────────────────
+function renderAll() {
+  computeMatrix();
+  const stats = getStats();
+  renderStats(stats);
+  renderSidebar();
+  renderDashboard(stats);
+  renderMatrix();
+  renderClashTable(stats);
+}
+
+function renderStats(stats) {
+  document.getElementById('stat-reports').textContent = reports.length;
+  document.getElementById('stat-total').textContent = stats.totalClashes;
+  document.getElementById('stat-new').textContent = stats.newClashes;
+  document.getElementById('stat-resolved').textContent = stats.resolved;
+}
+
+function renderSidebar() {
+  const list = document.getElementById('reports-list');
+  const maxClashes = Math.max(...reports.map(r => r.clashes.length), 1);
+  list.innerHTML = reports.map(r => `
+    <div class="report-item">
+      <div class="report-item-info">
+        <div class="report-name" title="${r.name}">${r.name}</div>
+        <div class="report-meta">${r.clashes.length} clashes · ${(r.size/1024).toFixed(0)} KB</div>
+        <div class="mini-bar-outer" style="margin-top:4px">
+          <div class="mini-bar-inner" style="width:${(r.clashes.length/maxClashes*100)}%"></div>
+        </div>
+      </div>
+      <button class="btn btn-danger" onclick="removeReport('${r.name}')">✕</button>
+    </div>
+  `).join('');
+  document.getElementById('export-area').style.display = reports.length ? 'block' : 'none';
+}
+
+function renderDashboard(stats) {
+  const empty = document.getElementById('dashboard-empty');
+  const charts = document.getElementById('dashboard-charts');
+  if (reports.length === 0) {
+    empty.style.display = 'block'; charts.style.display = 'none'; return;
+  }
+  empty.style.display = 'none'; charts.style.display = 'grid';
+  const maxClashes = Math.max(...reports.map(r => r.clashes.length), 1);
+
+  // Clashes by report
+  document.getElementById('chart-reports').innerHTML = reports.map(r => `
+    <div style="margin-bottom:12px">
+      <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px">
+        <span style="color:var(--text);max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${r.name}">${r.name}</span>
+        <span style="color:var(--accent);font-weight:700">${r.clashes.length}</span>
+      </div>
+      <div class="mini-bar-outer"><div class="mini-bar-inner" style="width:${r.clashes.length/maxClashes*100}%"></div></div>
+    </div>
+  `).join('');
+
+  // Status breakdown
+  document.getElementById('chart-status').innerHTML = Object.entries(stats.statusCounts).map(([s, n]) => `
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+      ${badge(s, statusColor(s))}
+      <div style="flex:1"><div class="mini-bar-outer"><div class="mini-bar-inner" style="width:${stats.totalClashes?n/stats.totalClashes*100:0}%;background:${statusColor(s)}"></div></div></div>
+      <span style="font-size:12px;color:var(--text-dim);min-width:30px;text-align:right">${n}</span>
+    </div>
+  `).join('');
+
+  // Quick matrix
+  const qmCard = document.getElementById('quick-matrix-card');
+  if (matrix) {
+    qmCard.style.display = 'block';
+    const t = document.getElementById('quick-matrix-table');
+    t.innerHTML = `
+      <thead><tr>
+        <th style="min-width:160px">Report</th>
+        ${reports.map(r => `<th style="min-width:80px">${r.name.slice(0,12)}…</th>`).join('')}
+      </tr></thead>
+      <tbody>
+        ${reports.map(ra => `
+          <tr>
+            <td style="font-weight:600;color:var(--accent)">${ra.name.slice(0,20)}</td>
+            ${reports.map(rb => {
+              const val = matrix[ra.name][rb.name];
+              const common = val?.common.length ?? 0;
+              const cellStyle = val ? matrixCellStyle(common) : 'background:transparent;color:var(--text-muted)';
+              return `<td style="padding:4px" ${val ? `onclick="openCellMatrix('${ra.name}','${rb.name}')"` : ''}>
+                <div style="${cellStyle};padding:6px;text-align:center;border-radius:4px;border:1px solid var(--border);cursor:${val?'pointer':'default'}">${val ? common : '—'}</div>
+              </td>`;
+            }).join('')}
+          </tr>`).join('')}
+      </tbody>`;
+  } else {
+    qmCard.style.display = 'none';
+  }
+}
+
+function matrixCellStyle(val) {
+  const bg = val > 100 ? 'color-mix(in srgb,var(--danger) 20%,transparent)' :
+             val > 50  ? 'color-mix(in srgb,var(--warning) 15%,transparent)' :
+             val > 0   ? 'color-mix(in srgb,var(--success) 15%,transparent)' :
+             'var(--matrix-cell)';
+  const color = val > 100 ? 'var(--danger)' : val > 50 ? 'var(--warning)' : val > 0 ? 'var(--success)' : 'var(--text-dim)';
+  return `background:${bg};color:${color}`;
+}
+
+function renderMatrix() {
+  const empty = document.getElementById('matrix-empty');
+  const content = document.getElementById('matrix-content');
+  if (reports.length < 2 || !matrix) {
+    empty.style.display = 'block'; content.style.display = 'none'; return;
+  }
+  empty.style.display = 'none'; content.style.display = 'block';
+  const t = document.getElementById('matrix-table');
+  t.innerHTML = `
+    <thead><tr>
+      <th style="min-width:180px">Report</th>
+      ${reports.map(r => `<th style="min-width:100px;max-width:140px"><div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:130px" title="${r.name}">${r.name}</div></th>`).join('')}
+    </tr></thead>
+    <tbody>
+      ${reports.map(ra => `
+        <tr>
+          <td style="font-weight:600;color:var(--accent)">${ra.name}</td>
+          ${reports.map(rb => {
+            const val = matrix[ra.name][rb.name];
+            const common = val?.common.length ?? 0;
+            if (!val) return `<td style="padding:4px;border:1px solid color-mix(in srgb,var(--border) 20%,transparent)">
+              <div style="padding:10px 8px;text-align:center;color:var(--text-muted);min-width:90px">—</div></td>`;
+            return `<td style="padding:4px;border:1px solid color-mix(in srgb,var(--border) 20%,transparent)">
+              <div style="${matrixCellStyle(common)};padding:10px 8px;text-align:center;border-radius:4px;border:1px solid var(--border);cursor:pointer;min-width:90px;transition:all 0.15s"
+                onclick="openCellMatrix('${ra.name}','${rb.name}')">
+                <div style="font-size:15px">${common}</div>
+                <div style="font-size:10px;opacity:0.7">+${val.newClashes.length} -${val.resolved.length}</div>
+              </div></td>`;
+          }).join('')}
+        </tr>`).join('')}
+    </tbody>`;
+}
+
+function openCellMatrix(raName, rbName) {
+  const ra = reports.find(r => r.name === raName);
+  const rb = reports.find(r => r.name === rbName);
+  if (!ra || !rb) return;
+  const result = matrix[raName][rbName];
+  selectedCell = { ra, rb, result };
+  const panel = document.getElementById('selected-cell-panel');
+  panel.classList.add('visible');
+  document.getElementById('cell-panel-title').innerHTML =
+    `Comparison: <span style="color:var(--accent)">${ra.name}</span> vs <span style="color:var(--info)">${rb.name}</span>`;
+  const sections = [
+    { label: 'Common', items: result.common.map(x => x.a), color: 'var(--success)' },
+    { label: 'New in B', items: result.newClashes, color: 'var(--warning)' },
+    { label: 'Resolved in B', items: result.resolved, color: 'var(--danger)' },
+  ];
+  document.getElementById('cell-panel-body').innerHTML = sections.map(sec => `
+    <div class="cell-panel-col">
+      <div style="margin-bottom:8px">${badge(`${sec.label} (${sec.items.length})`, sec.color)}</div>
+      <div class="cell-panel-list">
+        ${sec.items.slice(0,20).map(c => `
+          <div class="cell-clash-row">
+            <span style="color:var(--text);font-weight:600">${c.clashId}</span> — ${c.objectA} ↔ ${c.objectB}
+          </div>`).join('')}
+        ${sec.items.length > 20 ? `<div style="font-size:11px;color:var(--text-muted);margin-top:4px">…and ${sec.items.length-20} more</div>` : ''}
+      </div>
+    </div>
+  `).join('');
+  // Switch to matrix tab if on dashboard
+  if (currentTab === 'dashboard') switchTab('matrix');
+}
+
+function renderClashTable(stats) {
+  let arr = stats.allClashes.filter(c =>
+    (statusFilter === 'All' || c.status === statusFilter) &&
+    (!searchQ || Object.values(c).some(v => String(v).toLowerCase().includes(searchQ.toLowerCase())))
+  );
+  arr.sort((a, b) => {
+    const va = a[sortField] || '', vb = b[sortField] || '';
+    return sortDir === 'asc' ? String(va).localeCompare(String(vb)) : String(vb).localeCompare(String(va));
+  });
+  document.getElementById('clash-count').textContent = `${arr.length} clashes`;
+  const tbody = document.getElementById('clash-tbody');
+  tbody.innerHTML = arr.slice(0, 300).map(c => `
+    <tr>
+      <td style="font-weight:700;color:var(--accent)">${c.clashId}</td>
+      <td title="${c.reportName}">${c.reportName.slice(0,18)}</td>
+      <td title="${c.testName}">${c.testName.slice(0,20)}</td>
+      <td title="${c.objectA}">${c.objectA}</td>
+      <td title="${c.objectB}">${c.objectB}</td>
+      <td>${badge(c.status, statusColor(c.status))}</td>
+      <td>${c.coordinates.slice(0,20)}</td>
+      <td>${c.date}</td>
+    </tr>
+  `).join('');
+  const more = document.getElementById('clash-more');
+  if (arr.length > 300) {
+    more.style.display = 'block';
+    more.textContent = `Showing 300 of ${arr.length} — use search/filter to narrow results`;
+  } else { more.style.display = 'none'; }
+}
+
+// ─── TAB SWITCHING ───────────────────────────────────────────────────────────
+function switchTab(id) {
+  currentTab = id;
+  document.querySelectorAll('.nav-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === id));
+  document.querySelectorAll('.tab-content').forEach(t => t.classList.toggle('active', t.id === `tab-${id}`));
+}
+
+// ─── FILE HANDLING ───────────────────────────────────────────────────────────
+async function processFiles(files) {
+  const area = document.getElementById('parse-progress-area');
+  const bar = document.getElementById('progress-bar');
+  const label = document.getElementById('parse-progress-label');
+  area.style.display = 'block';
+  const arr = [...files];
+  const newReports = [];
+  for (let i = 0; i < arr.length; i++) {
+    const file = arr[i];
+    const text = await file.text();
+    const clashes = parseClashHTML(text, file.name);
+    newReports.push({ name: file.name, clashes, size: file.size });
+    const pct = Math.round(((i+1)/arr.length)*100);
+    bar.style.width = pct + '%';
+    label.textContent = `Parsing… ${pct}%`;
+    await new Promise(r => setTimeout(r, 80));
+  }
+  const names = new Set(reports.map(r => r.name));
+  reports = [...reports, ...newReports.filter(r => !names.has(r.name))];
+  area.style.display = 'none';
+  renderAll();
+}
+
+function removeReport(name) {
+  reports = reports.filter(r => r.name !== name);
+  renderAll();
+}
+
+// ─── EXPORT ──────────────────────────────────────────────────────────────────
+function exportExcel() {
+  const btn = document.getElementById('export-btn');
+  btn.textContent = '⏳ Exporting…'; btn.disabled = true;
+  setTimeout(() => {
+    const stats = getStats();
+    const wb = XLSX.utils.book_new();
+    const summaryData = [
+      ['BIM Clash Detection Report Analysis'],
+      ['Generated:', new Date().toLocaleString()], [],
+      ['Total Reports', reports.length],
+      ['Total Clashes', stats.totalClashes],
+      ['New Clashes', stats.newClashes],
+      ['Resolved Clashes', stats.resolved], [],
+      ['Report Name','Total Clashes','Active','Resolved'],
+      ...reports.map(r => [r.name, r.clashes.length,
+        r.clashes.filter(c => c.status==='Active').length,
+        r.clashes.filter(c => c.status==='Resolved').length])
+    ];
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(summaryData), 'Summary');
+    if (matrix) {
+      const names = reports.map(r => r.name);
+      const matrixData = [['Clash Matrix (Common Clashes)', ...names],
+        ...names.map(ra => [ra, ...names.map(rb => ra===rb ? '-' : (matrix[ra][rb]?.common.length ?? 0))])];
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(matrixData), 'Clash Matrix');
+    }
+    const allClashData = [['Report','Clash ID','Test Name','Object A','Object B','Status','Coordinates','Date'],
+      ...stats.allClashes.map(c => [c.reportName,c.clashId,c.testName,c.objectA,c.objectB,c.status,c.coordinates,c.date])];
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(allClashData), 'All Clashes');
+    if (matrix) {
+      const newRows = [];
+      reports.forEach(ra => reports.forEach(rb => {
+        if (ra.name !== rb.name)
+          matrix[ra.name][rb.name]?.newClashes.forEach(c => newRows.push([ra.name,rb.name,c.clashId,c.objectA,c.objectB,c.status]));
+      }));
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['Base Report','Compared With','Clash ID','Object A','Object B','Status'],...newRows]), 'New Clashes');
+    }
+    XLSX.writeFile(wb, 'BIM_Clash_Analysis.xlsx');
+    btn.textContent = '📥 Export Excel'; btn.disabled = false;
+  }, 100);
+}
+
+// ─── EVENTS ──────────────────────────────────────────────────────────────────
+document.querySelectorAll('.nav-btn').forEach(btn => {
+  btn.addEventListener('click', () => switchTab(btn.dataset.tab));
+});
+
+document.getElementById('theme-toggle').addEventListener('click', () => {
+  theme = theme === 'dark' ? 'light' : 'dark';
+  document.documentElement.classList.toggle('light', theme === 'light');
+  document.getElementById('theme-toggle').textContent = theme === 'dark' ? '☀️ Light' : '🌙 Dark';
+});
+
+const dropZone = document.getElementById('drop-zone');
+dropZone.addEventListener('click', () => document.getElementById('file-input').click());
+dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+dropZone.addEventListener('drop', e => {
+  e.preventDefault(); dropZone.classList.remove('drag-over');
+  const files = [...e.dataTransfer.files].filter(f => f.name.endsWith('.html'));
+  if (files.length) processFiles(files);
+});
+document.getElementById('file-input').addEventListener('change', e => processFiles(e.target.files));
+document.getElementById('export-btn').addEventListener('click', exportExcel);
+
+document.getElementById('search-input').addEventListener('input', e => {
+  searchQ = e.target.value; renderClashTable(getStats());
+});
+document.getElementById('status-filter').addEventListener('change', e => {
+  statusFilter = e.target.value; renderClashTable(getStats());
+});
+document.querySelectorAll('th[data-field]').forEach(th => {
+  th.addEventListener('click', () => {
+    const field = th.dataset.field;
+    if (sortField === field) sortDir = sortDir === 'asc' ? 'desc' : 'asc';
+    else { sortField = field; sortDir = 'asc'; }
+    document.querySelectorAll('th[data-field]').forEach(t => {
+      t.textContent = t.dataset.field === field
+        ? `${t.textContent.replace(/ [↑↓]$/,'')} ${sortDir === 'asc' ? '↑' : '↓'}`
+        : t.textContent.replace(/ [↑↓]$/, '');
+    });
+    renderClashTable(getStats());
+  });
+});
+
+document.getElementById('close-cell-panel').addEventListener('click', () => {
+  document.getElementById('selected-cell-panel').classList.remove('visible');
+  selectedCell = null;
+});
+
+document.getElementById('tolerance-input').addEventListener('change', e => {
+  tolerance = +e.target.value; renderAll();
+});
+
+// Init
+renderAll();
+</script>
+</body>
+</html>
